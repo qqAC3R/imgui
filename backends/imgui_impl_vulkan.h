@@ -57,7 +57,7 @@ struct ImGui_ImplVulkan_InitInfo
     uint32_t                        MinImageCount;          // >= 2
     uint32_t                        ImageCount;             // >= MinImageCount
     VkSampleCountFlagBits           MSAASamples;            // >= VK_SAMPLE_COUNT_1_BIT
-    const VkAllocationCallbacks*    Allocator;
+    const VkAllocationCallbacks* Allocator;
     void                            (*CheckVkResultFn)(VkResult err);
 };
 
@@ -69,6 +69,7 @@ IMGUI_IMPL_API void     ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, V
 IMGUI_IMPL_API bool     ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer);
 IMGUI_IMPL_API void     ImGui_ImplVulkan_DestroyFontUploadObjects();
 IMGUI_IMPL_API void     ImGui_ImplVulkan_SetMinImageCount(uint32_t min_image_count); // To override MinImageCount after initialization (e.g. if swap chain is recreated)
+IMGUI_IMPL_API ImTextureID    ImGui_ImplVulkan_AddTexture(VkSampler sampler, VkImageView image_view, VkImageLayout image_layout);
 
 // Optional: load Vulkan functions with a custom function loader
 // This is only useful with IMGUI_IMPL_VULKAN_NO_PROTOTYPES / VK_NO_PROTOTYPES
@@ -136,8 +137,8 @@ struct ImGui_ImplVulkanH_Window
     uint32_t            FrameIndex;             // Current frame being rendered to (0 <= FrameIndex < FrameInFlightCount)
     uint32_t            ImageCount;             // Number of simultaneous in-flight frames (returned by vkGetSwapchainImagesKHR, usually derived from min_image_count)
     uint32_t            SemaphoreIndex;         // Current set of swapchain wait semaphores we're using (needs to be distinct from per frame data)
-    ImGui_ImplVulkanH_Frame*            Frames;
-    ImGui_ImplVulkanH_FrameSemaphores*  FrameSemaphores;
+    ImGui_ImplVulkanH_Frame* Frames;
+    ImGui_ImplVulkanH_FrameSemaphores* FrameSemaphores;
 
     ImGui_ImplVulkanH_Window()
     {
@@ -146,4 +147,3 @@ struct ImGui_ImplVulkanH_Window
         ClearEnable = true;
     }
 };
-

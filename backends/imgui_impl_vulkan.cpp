@@ -74,7 +74,7 @@ struct ImGui_ImplVulkanH_WindowRenderBuffers
 {
     uint32_t            Index;
     uint32_t            Count;
-    ImGui_ImplVulkanH_FrameRenderBuffers*   FrameRenderBuffers;
+    ImGui_ImplVulkanH_FrameRenderBuffers* FrameRenderBuffers;
 };
 
 // Vulkan data
@@ -86,7 +86,7 @@ struct ImGui_ImplVulkan_Data
     VkPipelineCreateFlags       PipelineCreateFlags;
     VkDescriptorSetLayout       DescriptorSetLayout;
     VkPipelineLayout            PipelineLayout;
-    VkDescriptorSet             DescriptorSet;
+    //VkDescriptorSet             DescriptorSet;
     VkPipeline                  Pipeline;
     uint32_t                    Subpass;
     VkShaderModule              ShaderModuleVert;
@@ -109,6 +109,16 @@ struct ImGui_ImplVulkan_Data
         BufferMemoryAlignment = 256;
     }
 };
+
+struct VkImGuiImageInfo
+{
+    VkSampler Sampler;
+    VkImageLayout ImageLayout;
+
+    VkDescriptorSet DescriptorSet;
+};
+
+static std::unordered_map<VkImageView, VkImGuiImageInfo> s_VulkanCache;
 
 // Forward Declarations
 bool ImGui_ImplVulkan_CreateDeviceObjects();
@@ -378,8 +388,8 @@ static void ImGui_ImplVulkan_SetupRenderState(ImDrawData* draw_data, VkPipeline 
     // Bind pipeline and descriptor sets:
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        VkDescriptorSet desc_set[1] = { bd->DescriptorSet };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, bd->PipelineLayout, 0, 1, desc_set, 0, NULL);
+        //VkDescriptorSet desc_set[1] = { bd->DescriptorSet };
+        //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, bd->PipelineLayout, 0, 1, desc_set, 0, NULL);
     }
 
     // Bind Vertex And Index Buffer:
@@ -533,6 +543,12 @@ void ImGui_ImplVulkan_RenderDrawData(ImDrawData* draw_data, VkCommandBuffer comm
                     scissor.extent.height = (uint32_t)(clip_rect.w - clip_rect.y);
                     vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
+                    // Bind descriptorset with font or user texture
+                    VkPipelineLayout pipelineLayout = ImGui_ImplVulkan_GetBackendData()->PipelineLayout;
+                    VkDescriptorSet desc_set = (VkDescriptorSet)pcmd->TextureId;
+                    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, bd->PipelineLayout, 0, 1, &desc_set, 0, NULL);
+
+
                     // Draw
                     vkCmdDrawIndexed(command_buffer, pcmd->ElemCount, 1, pcmd->IdxOffset + global_idx_offset, pcmd->VtxOffset + global_vtx_offset, 0);
                 }
@@ -601,6 +617,7 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
     }
 
     // Update the Descriptor Set:
+#if 0
     {
         VkDescriptorImageInfo desc_image[1] = {};
         desc_image[0].sampler = bd->FontSampler;
@@ -614,6 +631,9 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
         write_desc[0].pImageInfo = desc_image;
         vkUpdateDescriptorSets(v->Device, 1, write_desc, 0, NULL);
     }
+#endif
+    VkDescriptorSet font_descriptor_set = (VkDescriptorSet)ImGui_ImplVulkan_AddTexture(bd->FontSampler, bd->FontView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
 
     // Create the Upload Buffer:
     {
@@ -691,7 +711,8 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
     }
 
     // Store our identifier
-    io.Fonts->SetTexID((ImTextureID)(intptr_t)bd->FontImage);
+    //io.Fonts->SetTexID((ImTextureID)(intptr_t)bd->FontImage);
+    io.Fonts->SetTexID((ImTextureID)(intptr_t)font_descriptor_set);
 
     return true;
 }
@@ -916,12 +937,12 @@ bool ImGui_ImplVulkan_CreateDeviceObjects()
 
     if (!bd->DescriptorSetLayout)
     {
-        VkSampler sampler[1] = {bd->FontSampler};
+        VkSampler sampler[1] = { bd->FontSampler };
         VkDescriptorSetLayoutBinding binding[1] = {};
         binding[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         binding[0].descriptorCount = 1;
         binding[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        binding[0].pImmutableSamplers = sampler;
+        //binding[0].pImmutableSamplers = sampler;
         VkDescriptorSetLayoutCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         info.bindingCount = 1;
@@ -930,6 +951,7 @@ bool ImGui_ImplVulkan_CreateDeviceObjects()
         check_vk_result(err);
     }
 
+#if 0
     // Create Descriptor Set:
     {
         VkDescriptorSetAllocateInfo alloc_info = {};
@@ -940,6 +962,7 @@ bool ImGui_ImplVulkan_CreateDeviceObjects()
         err = vkAllocateDescriptorSets(v->Device, &alloc_info, &bd->DescriptorSet);
         check_vk_result(err);
     }
+#endif
 
     if (!bd->PipelineLayout)
     {
@@ -987,15 +1010,15 @@ void    ImGui_ImplVulkan_DestroyDeviceObjects()
     ImGui_ImplVulkanH_DestroyWindowRenderBuffers(v->Device, &bd->MainWindowRenderBuffers, v->Allocator);
     ImGui_ImplVulkan_DestroyFontUploadObjects();
 
-    if (bd->ShaderModuleVert)     { vkDestroyShaderModule(v->Device, bd->ShaderModuleVert, v->Allocator); bd->ShaderModuleVert = VK_NULL_HANDLE; }
-    if (bd->ShaderModuleFrag)     { vkDestroyShaderModule(v->Device, bd->ShaderModuleFrag, v->Allocator); bd->ShaderModuleFrag = VK_NULL_HANDLE; }
-    if (bd->FontView)             { vkDestroyImageView(v->Device, bd->FontView, v->Allocator); bd->FontView = VK_NULL_HANDLE; }
-    if (bd->FontImage)            { vkDestroyImage(v->Device, bd->FontImage, v->Allocator); bd->FontImage = VK_NULL_HANDLE; }
-    if (bd->FontMemory)           { vkFreeMemory(v->Device, bd->FontMemory, v->Allocator); bd->FontMemory = VK_NULL_HANDLE; }
-    if (bd->FontSampler)          { vkDestroySampler(v->Device, bd->FontSampler, v->Allocator); bd->FontSampler = VK_NULL_HANDLE; }
-    if (bd->DescriptorSetLayout)  { vkDestroyDescriptorSetLayout(v->Device, bd->DescriptorSetLayout, v->Allocator); bd->DescriptorSetLayout = VK_NULL_HANDLE; }
-    if (bd->PipelineLayout)       { vkDestroyPipelineLayout(v->Device, bd->PipelineLayout, v->Allocator); bd->PipelineLayout = VK_NULL_HANDLE; }
-    if (bd->Pipeline)             { vkDestroyPipeline(v->Device, bd->Pipeline, v->Allocator); bd->Pipeline = VK_NULL_HANDLE; }
+    if (bd->ShaderModuleVert) { vkDestroyShaderModule(v->Device, bd->ShaderModuleVert, v->Allocator); bd->ShaderModuleVert = VK_NULL_HANDLE; }
+    if (bd->ShaderModuleFrag) { vkDestroyShaderModule(v->Device, bd->ShaderModuleFrag, v->Allocator); bd->ShaderModuleFrag = VK_NULL_HANDLE; }
+    if (bd->FontView) { vkDestroyImageView(v->Device, bd->FontView, v->Allocator); bd->FontView = VK_NULL_HANDLE; }
+    if (bd->FontImage) { vkDestroyImage(v->Device, bd->FontImage, v->Allocator); bd->FontImage = VK_NULL_HANDLE; }
+    if (bd->FontMemory) { vkFreeMemory(v->Device, bd->FontMemory, v->Allocator); bd->FontMemory = VK_NULL_HANDLE; }
+    if (bd->FontSampler) { vkDestroySampler(v->Device, bd->FontSampler, v->Allocator); bd->FontSampler = VK_NULL_HANDLE; }
+    if (bd->DescriptorSetLayout) { vkDestroyDescriptorSetLayout(v->Device, bd->DescriptorSetLayout, v->Allocator); bd->DescriptorSetLayout = VK_NULL_HANDLE; }
+    if (bd->PipelineLayout) { vkDestroyPipelineLayout(v->Device, bd->PipelineLayout, v->Allocator); bd->PipelineLayout = VK_NULL_HANDLE; }
+    if (bd->Pipeline) { vkDestroyPipeline(v->Device, bd->Pipeline, v->Allocator); bd->Pipeline = VK_NULL_HANDLE; }
 }
 
 bool    ImGui_ImplVulkan_LoadFunctions(PFN_vkVoidFunction(*loader_func)(const char* function_name, void* user_data), void* user_data)
@@ -1463,4 +1486,48 @@ void ImGui_ImplVulkanH_DestroyWindowRenderBuffers(VkDevice device, ImGui_ImplVul
     buffers->FrameRenderBuffers = NULL;
     buffers->Index = 0;
     buffers->Count = 0;
+}
+
+
+ImTextureID ImGui_ImplVulkan_AddTexture(VkSampler sampler, VkImageView image_view, VkImageLayout image_layout)
+{
+    if (s_VulkanCache.find(image_view) != s_VulkanCache.end())
+        return (ImTextureID)s_VulkanCache[image_view].DescriptorSet;
+
+
+    VkResult err;
+
+    ImGui_ImplVulkan_InitInfo* v = &ImGui_ImplVulkan_GetBackendData()->VulkanInitInfo;
+    VkDescriptorSet descriptor_set;
+    // Create Descriptor Set:
+    {
+        VkDescriptorSetAllocateInfo alloc_info = {};
+        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc_info.descriptorPool = v->DescriptorPool;
+        alloc_info.descriptorSetCount = 1;
+        alloc_info.pSetLayouts = &ImGui_ImplVulkan_GetBackendData()->DescriptorSetLayout;
+        err = vkAllocateDescriptorSets(v->Device, &alloc_info, &descriptor_set);
+        check_vk_result(err);
+    }
+
+    // Update the Descriptor Set:
+    {
+        VkDescriptorImageInfo desc_image[1] = {};
+        desc_image[0].sampler = sampler;
+        desc_image[0].imageView = image_view;
+        desc_image[0].imageLayout = image_layout;
+        VkWriteDescriptorSet write_desc[1] = {};
+        write_desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write_desc[0].dstSet = descriptor_set;
+        write_desc[0].descriptorCount = 1;
+        write_desc[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write_desc[0].pImageInfo = desc_image;
+        vkUpdateDescriptorSets(v->Device, 1, write_desc, 0, NULL);
+    }
+
+    s_VulkanCache[image_view].Sampler = sampler;
+    s_VulkanCache[image_view].ImageLayout = image_layout;
+    s_VulkanCache[image_view].DescriptorSet = descriptor_set;
+
+    return (ImTextureID)descriptor_set;
 }
