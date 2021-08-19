@@ -15,24 +15,19 @@
 #CXX = clang++
 
 EXE = example_glfw_opengl3
-IMGUI_DIR = ../..
 SOURCES = main.cpp
-SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
-SOURCES += $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
+SOURCES += ../imgui_impl_glfw.cpp ../imgui_impl_opengl3.cpp
+SOURCES += ../../imgui.cpp ../../imgui_demo.cpp ../../imgui_draw.cpp ../../imgui_widgets.cpp
 OBJS = $(addsuffix .o, $(basename $(notdir $(SOURCES))))
 UNAME_S := $(shell uname -s)
-LINUX_GL_LIBS = -lGL
 
-CXXFLAGS = -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends
+CXXFLAGS = -I../ -I../../
 CXXFLAGS += -g -Wall -Wformat
 LIBS =
 
 ##---------------------------------------------------------------------
-## OPENGL LOADER / OPENGL ES
+## OPENGL LOADER
 ##---------------------------------------------------------------------
-
-## See below for OpenGL ES option (no loader required) - comment out
-## the following if you want to use OpenGL ES instead of Desktop GL.
 
 ## Using OpenGL loader: gl3w [default]
 SOURCES += ../libs/gl3w/GL/gl3w.c
@@ -60,18 +55,13 @@ CXXFLAGS += -I../libs/gl3w -DIMGUI_IMPL_OPENGL_LOADER_GL3W
 # CXXFLAGS += -DIMGUI_IMPL_OPENGL_LOADER_GLBINDING2
 # LIBS += -lglbinding
 
-## Using OpenGL ES, no loader required
-## This assumes a GL ES library available in the system, e.g. libGLESv2.so
-# CXXFLAGS += -DIMGUI_IMPL_OPENGL_ES2
-# LINUX_GL_LIBS = -lGLESv2
-
 ##---------------------------------------------------------------------
 ## BUILD FLAGS PER PLATFORM
 ##---------------------------------------------------------------------
 
 ifeq ($(UNAME_S), Linux) #LINUX
 	ECHO_MESSAGE = "Linux"
-	LIBS += $(LINUX_GL_LIBS) `pkg-config --static --libs glfw3`
+	LIBS += -lGL `pkg-config --static --libs glfw3`
 
 	CXXFLAGS += `pkg-config --cflags glfw3`
 	CFLAGS = $(CXXFLAGS)
@@ -80,15 +70,15 @@ endif
 ifeq ($(UNAME_S), Darwin) #APPLE
 	ECHO_MESSAGE = "Mac OS X"
 	LIBS += -framework OpenGL -framework Cocoa -framework IOKit -framework CoreVideo
-	LIBS += -L/usr/local/lib -L/opt/local/lib -L/opt/homebrew/lib
+	LIBS += -L/usr/local/lib -L/opt/local/lib
 	#LIBS += -lglfw3
 	LIBS += -lglfw
 
-	CXXFLAGS += -I/usr/local/include -I/opt/local/include -I/opt/homebrew/include
+	CXXFLAGS += -I/usr/local/include -I/opt/local/include
 	CFLAGS = $(CXXFLAGS)
 endif
 
-ifeq ($(OS), Windows_NT)
+ifeq ($(findstring MINGW,$(UNAME_S)),MINGW)
 	ECHO_MESSAGE = "MinGW"
 	LIBS += -lglfw3 -lgdi32 -lopengl32 -limm32
 
@@ -103,10 +93,10 @@ endif
 %.o:%.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-%.o:$(IMGUI_DIR)/%.cpp
+%.o:../%.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-%.o:$(IMGUI_DIR)/backends/%.cpp
+%.o:../../%.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 %.o:../libs/gl3w/GL/%.c
