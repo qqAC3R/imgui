@@ -1,4 +1,3 @@
-#if 1
 // dear imgui: Renderer Backend for Vulkan
 // This needs to be used along with a Platform Backend (e.g. GLFW, SDL, Win32, custom..)
 
@@ -55,6 +54,8 @@
 //  2016-08-27: Vulkan: Fix Vulkan example for use when a depth buffer is active.
 
 #include "imgui_impl_vulkan.h"
+#include "Frost/Platform/Vulkan/VulkanRenderer.h"
+#include "Frost/Platform/Vulkan/VulkanContext.h"
 #include <stdio.h>
 
 // Reusable buffers used for rendering 1 current in-flight frame, for ImGui_ImplVulkan_RenderDrawData()
@@ -87,7 +88,7 @@ struct ImGui_ImplVulkan_Data
     VkPipelineCreateFlags       PipelineCreateFlags;
     VkDescriptorSetLayout       DescriptorSetLayout;
     VkPipelineLayout            PipelineLayout;
-    //VkDescriptorSet             DescriptorSet;
+    VkDescriptorPool            InternalDescriptorPool;
     VkPipeline                  Pipeline;
     uint32_t                    Subpass;
     VkShaderModule              ShaderModuleVert;
@@ -618,23 +619,30 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
     }
 
     // Update the Descriptor Set:
-#if 0
+    VkDescriptorSet font_descriptor_set;
+
     {
+        VkDevice device = Frost::VulkanContext::GetCurrentDevice()->GetVulkanDevice();
+
+        VkDescriptorSetAllocateInfo alloc_info = {};
+        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc_info.descriptorSetCount = 1;
+        alloc_info.pSetLayouts = &ImGui_ImplVulkan_GetBackendData()->DescriptorSetLayout;
+        alloc_info.descriptorPool = bd->InternalDescriptorPool;
+        FROST_VKCHECK(vkAllocateDescriptorSets(device, &alloc_info, &font_descriptor_set));
+
         VkDescriptorImageInfo desc_image[1] = {};
         desc_image[0].sampler = bd->FontSampler;
         desc_image[0].imageView = bd->FontView;
         desc_image[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         VkWriteDescriptorSet write_desc[1] = {};
         write_desc[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write_desc[0].dstSet = bd->DescriptorSet;
+        write_desc[0].dstSet = font_descriptor_set;
         write_desc[0].descriptorCount = 1;
         write_desc[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         write_desc[0].pImageInfo = desc_image;
         vkUpdateDescriptorSets(v->Device, 1, write_desc, 0, NULL);
     }
-#endif
-    VkDescriptorSet font_descriptor_set = (VkDescriptorSet)ImGui_ImplVulkan_AddTexture(bd->FontSampler, bd->FontView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
 
     // Create the Upload Buffer:
     {
@@ -716,6 +724,34 @@ bool ImGui_ImplVulkan_CreateFontsTexture(VkCommandBuffer command_buffer)
     io.Fonts->SetTexID((ImTextureID)(intptr_t)font_descriptor_set);
 
     return true;
+}
+
+IMGUI_IMPL_API void ImGui_ImplVulkan_CreateInternalDescriptorPool()
+{
+    VkDevice device = Frost::VulkanContext::GetCurrentDevice()->GetVulkanDevice();
+    ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
+
+    VkDescriptorPoolSize pool_sizes[] =
+    {
+        { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+        { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+    };
+    VkDescriptorPoolCreateInfo pool_info = {};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    pool_info.maxSets = 1000 * IM_ARRAYSIZE(pool_sizes);
+    pool_info.poolSizeCount = (uint32_t)IM_ARRAYSIZE(pool_sizes);
+    pool_info.pPoolSizes = pool_sizes;
+    FROST_VKCHECK(vkCreateDescriptorPool(device, &pool_info, nullptr, &bd->InternalDescriptorPool));
 }
 
 static void ImGui_ImplVulkan_CreateShaderModules(VkDevice device, const VkAllocationCallbacks* allocator)
@@ -1070,6 +1106,7 @@ bool    ImGui_ImplVulkan_Init(ImGui_ImplVulkan_InitInfo* info, VkRenderPass rend
     bd->Subpass = info->Subpass;
 
     ImGui_ImplVulkan_CreateDeviceObjects();
+    ImGui_ImplVulkan_CreateInternalDescriptorPool();
 
     return true;
 }
@@ -1078,7 +1115,9 @@ void ImGui_ImplVulkan_Shutdown()
 {
     ImGuiIO& io = ImGui::GetIO();
     ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
+    VkDevice device = Frost::VulkanContext::GetCurrentDevice()->GetVulkanDevice();
 
+    vkDestroyDescriptorPool(device, bd->InternalDescriptorPool, nullptr);
     ImGui_ImplVulkan_DestroyDeviceObjects();
     io.BackendRendererName = NULL;
     io.BackendRendererUserData = NULL;
@@ -1492,23 +1531,16 @@ void ImGui_ImplVulkanH_DestroyWindowRenderBuffers(VkDevice device, ImGui_ImplVul
 
 ImTextureID ImGui_ImplVulkan_AddTexture(VkSampler sampler, VkImageView image_view, VkImageLayout image_layout)
 {
-    if (s_VulkanCache.find(image_view) != s_VulkanCache.end())
-        return (ImTextureID)s_VulkanCache[image_view].DescriptorSet;
-
-
-    VkResult err;
-
     ImGui_ImplVulkan_InitInfo* v = &ImGui_ImplVulkan_GetBackendData()->VulkanInitInfo;
     VkDescriptorSet descriptor_set;
+
     // Create Descriptor Set:
     {
         VkDescriptorSetAllocateInfo alloc_info = {};
         alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        alloc_info.descriptorPool = v->DescriptorPool;
         alloc_info.descriptorSetCount = 1;
         alloc_info.pSetLayouts = &ImGui_ImplVulkan_GetBackendData()->DescriptorSetLayout;
-        err = vkAllocateDescriptorSets(v->Device, &alloc_info, &descriptor_set);
-        check_vk_result(err);
+        descriptor_set = Frost::VulkanRenderer::AllocateDescriptorSet(alloc_info);
     }
 
     // Update the Descriptor Set:
@@ -1525,14 +1557,5 @@ ImTextureID ImGui_ImplVulkan_AddTexture(VkSampler sampler, VkImageView image_vie
         write_desc[0].pImageInfo = desc_image;
         vkUpdateDescriptorSets(v->Device, 1, write_desc, 0, NULL);
     }
-
-    s_VulkanCache[image_view].Sampler = sampler;
-    s_VulkanCache[image_view].ImageLayout = image_layout;
-    s_VulkanCache[image_view].DescriptorSet = descriptor_set;
-
     return (ImTextureID)descriptor_set;
 }
-
-#endif
-
-
